@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Update Student</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='home.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Update Student</h1>
+        <form action="{{ url_for('update_student', sid=student['student_id']) }}" method="post">
+    <label>First Name</label>
+    <input type="text" name="first_name" value="{{ student['first_name'] }}" required>
+
+    <label>Last Name</label>
+    <input type="text" name="last_name" value="{{ student['last_name'] }}" required>
+
+    <label>Age</label>
+    <input type="number" name="age" value="{{ student['age'] }}" required>
+
+    <label>Gender</label>
+    <input type="text" name="gender" value="{{ student['gender'] }}" required>
+
+    <label>BMI</label>
+    <input type="text" name="bmi" value="{{ student['bmi'] }}">
+
+    <label>Street</label>
+    <input type="text" name="street" value="{{ student['street'] }}">
+
+    <label>City</label>
+    <input type="text" name="city" value="{{ student['city'] }}">
+
+    <label>State</label>
+    <input type="text" name="state" value="{{ student['state'] }}">
+
+    <label>Postal Code</label>
+    <input type="text" name="postal_code" value="{{ student['postal_code'] }}">
+
+    <button type="submit" class="add-student-btn">Save Changes</button>
+</form>
+        <a href="/" class="add-student-btn">Back to Home</a>
+    </div>
+</body>
+</html>

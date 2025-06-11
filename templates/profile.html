@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ student.first_name }} {{ student.last_name }} - Profile</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='profile.css') }}">
+</head>
+<body>
+     <div class="container">
+    <h1>Student Profile: {{ student.first_name }} {{ student.last_name }}</h1>
+    <a href="{{ url_for('update_student', sid=student['student_id']) }}" class="update-btn">
+  Update Info
+</a>
+    <div class="profile-content">
+        <div class="avatar-box">
+            <img src="{{ avatar_data }}" alt="Student Avatar">
+        </div>
+        <div class="description-box">
+            <h2>Description</h2>
+            <p>{{ profile_text }}</p>
+        </div>
+    </div>
+</div>
+</body>
+</html>
+
