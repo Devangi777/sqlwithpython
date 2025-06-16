@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request,jsonify
 from utils import get_db_connection
 import boto3
 import os
@@ -29,9 +29,10 @@ def home():
         for row in cursor.fetchall()
     ]
     conn.close()
+    return json.dumps(students)
     return render_template('home.html', students=students)
 
-@app.route('/student')
+@app.route('/student', methods=['GET'])
 def view_student():
     student_id = request.args.get('sid')
     conn = get_db_connection()
@@ -134,15 +135,21 @@ def view_student():
         avatar_b64 = img_data.get("images", [None])[0]
         avatar_data = f"data:image/png;base64,{avatar_b64}" if avatar_b64 else None
     except Exception as e:
-        avatar_data = None
+        return jsonify({"error":"something went wrong"}), 400
 
-    return render_template("profile.html", student=student, profile_text=student_profile, avatar_data=avatar_data)
+    
+    return jsonify({
+        "student": student,
+        "profile_text": student_profile,
+        "avatar_data": avatar_data
+    }), 200
+
 
 @app.route('/add')
 def add_page():
     return render_template('add_student.html')
 
-@app.route('/add_student', methods=['GET', 'POST'])
+@app.route('/add_student', methods=['POST'])
 def add_student():
     if request.method == 'POST':
         conn = None
@@ -159,7 +166,10 @@ def add_student():
             
             missing_fields = [field for field in required_fields if field not in form]
             if missing_fields:
-                return f"Missing required fields: {', '.join(missing_fields)}", 400
+                return jsonify({
+                    "status": "error",
+                    "message": f"Missing required fields: {', '.join(missing_fields)}"
+                }), 400
 
             conn = get_db_connection()
             cursor = conn.cursor()
@@ -223,21 +233,33 @@ def add_student():
             })
 
             conn.commit()
-            return redirect('/')
+            return jsonify({
+                "status": "success",
+                "message": f"Student {student_id} added successfully"
+            }), 201
 
         except ValueError as e:
             if conn:
                 conn.rollback()
-            return f"Invalid date format. Please use YYYY-MM-DD format. Error: {str(e)}", 400
+            return jsonify({
+                "status": "error",
+                "message": f"Invalid date format. Please use YYYY-MM-DD. Error: {str(e)}"
+            }), 400
         except Exception as e:
             if conn:
                 conn.rollback()
-            return f"An error occurred: {str(e)}", 500
+            return jsonify({
+                "status": "error",
+                "message": f"An error occurred: {str(e)}"
+            }), 500
         finally:
             if conn:
                 conn.close()
 
-    return render_template('add_student.html')
+    return jsonify({
+        "message": "Use POST to add a new student",
+        "required_fields": required_fields
+    }), 200
 
 # Delete page
 @app.route('/delete')
@@ -252,36 +274,41 @@ def delete_page():
     conn.close()
     return render_template('delete.html', students=students)
 
-# Delete handler
-@app.route('/delete_student', methods=['POST'])
+@app.route('/delete_student', methods=['DELETE'])
 def delete_student():
-    student_id = request.form.get('sid')
+    student_id = request.args.get('sid')  # From query string
+
     if not student_id:
         return "Student ID is required.", 400
 
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        # Delete in child tables first to maintain referential integrity
+        # Delete from ALL child tables first
+        cursor.execute("DELETE FROM enrollments WHERE student_id = :id", {'id': student_id})
         cursor.execute("DELETE FROM appearance WHERE student_id = :id", {'id': student_id})
         cursor.execute("DELETE FROM health_stats WHERE student_id = :id", {'id': student_id})
         cursor.execute("DELETE FROM address WHERE student_id = :id", {'id': student_id})
+        cursor.execute("DELETE FROM hobbies WHERE student_id = :id", {'id': student_id})
+
+        # Then delete from parent table
         cursor.execute("DELETE FROM students WHERE student_id = :id", {'id': student_id})
+
         conn.commit()
     except Exception as e:
         conn.rollback()
-        return f"Error deleting student: {str(e)}", 500
+        return jsonify({"error": f"Error deleting student: {str(e)}"}), 500
     finally:
         conn.close()
+    
+    return jsonify({"message": f"Student {student_id} deleted successfully."}), 200
 
-    return redirect('/')
-
-@app.route('/update/<int:sid>', methods=['GET', 'POST'])
+@app.route('/update/<int:sid>', methods=['PUT'])
 def update_student(sid):
     connection = get_db_connection()
     cursor = connection.cursor()
 
-    if request.method == 'POST':
+    if request.method == 'PUT':
         # Get updated data from form
         first_name = request.form['first_name']
         last_name = request.form['last_name']
@@ -292,6 +319,9 @@ def update_student(sid):
         city = request.form['city']
         state = request.form['state']
         postal_code = request.form['postal_code']
+
+        if not all([first_name, last_name, age, gender, bmi, street, city, state, postal_code]):
+            return jsonify({"error": "Missing one or more required fields"}), 400
 
         try:
             # Update students
@@ -322,14 +352,15 @@ def update_student(sid):
             """, (street, city, state, postal_code, sid))
 
             connection.commit()
+            return jsonify({"message": f"Student {sid} updated successfully"}), 200
         except Exception as e:
             connection.rollback()
-            return f"Error during update: {str(e)}", 500
+            return jsonify({"error": f"Error during update: {str(e)}"}), 500
         finally:
             cursor.close()
             connection.close()
 
-        return redirect(url_for('view_student', sid=sid))
+        return jsonify({"error": "Invalid method"}), 405
 
     # GET: fetch student info
     cursor.execute("""
@@ -355,13 +386,14 @@ def update_student(sid):
             'state': row[7],
             'postal_code': row[8]
         }
+        result=jsonify(student),200
     else:
-        student = {}
+        result = jsonify({"error": "Student not found"}), 404
 
     cursor.close()
     connection.close()
 
-    return render_template('update.html', student=student)
+    return result
 
 
 if __name__ == '__main__':
