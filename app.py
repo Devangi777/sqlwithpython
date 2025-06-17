@@ -1,15 +1,107 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, flash, session
 from utils import get_db_connection
 import boto3
 import os
 import json
 from dotenv import load_dotenv
 from flask import redirect, url_for
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # Load environment variables from .env
 load_dotenv()
 
 app = Flask(__name__)
+app.secret_key = os.getenv("SECRET_KEY")
+
+@app.route('/', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT password FROM users WHERE username = :1", [username])
+        result = cursor.fetchone()
+        conn.close()
+
+        if result and check_password_hash(result[0], password):
+            session['username'] = username
+            return redirect(url_for('home'))
+        else:
+            flash("Invalid username or password.")
+            return render_template('login.html')
+
+    return render_template('login.html')
+
+@app.route('/signup', methods=['GET', 'POST'])
+def signup():
+    if request.method == 'POST':
+        username = request.form['username']
+        email = request.form['email']
+        password = request.form['password']
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Check if username already exists
+        cursor.execute("SELECT * FROM users WHERE username = :1", [username])
+        if cursor.fetchone():
+            flash("Username already exists.")
+            conn.close()
+            return render_template('signup.html')
+
+        hashed_pw = generate_password_hash(password)
+
+        # Insert with email
+        cursor.execute(
+            "INSERT INTO users (username, email, password) VALUES (:1, :2, :3)",
+            (username, email, hashed_pw)
+        )
+        conn.commit()
+        conn.close()
+
+        flash("Signup successful! Please login.")
+        return redirect(url_for('login'))
+
+    return render_template('signup.html')
+
+
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    message = ""
+    success = False
+
+    if request.method == 'POST':
+        email = request.form['email']
+        new_password = request.form['new_password']
+        hashed_pw = generate_password_hash(new_password)
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE email = :1", [email])
+        user = cursor.fetchone()
+
+        if user:
+            cursor.execute("UPDATE users SET password = :1 WHERE email = :2", [hashed_pw, email])
+            conn.commit()
+            message = "Password successfully reset. You can now log in."
+            success = True
+        else:
+            message = "Email not found."
+
+        cursor.close()
+        conn.close()
+
+    return render_template('forgot_password.html', message=message, success=success)
+
+
+@app.route('/logout')
+def logout():
+    session.pop('username', None)
+    flash('Logged out successfully.', 'info')
+    return redirect(url_for('login'))
+
 
 # Initialize Amazon Bedrock Runtime client
 bedrock_runtime = boto3.client(
@@ -19,8 +111,11 @@ bedrock_runtime = boto3.client(
     aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")
 )
 
-@app.route('/')
+@app.route('/home')
 def home():
+    if 'username' not in session:
+        return redirect(url_for('login'))
+
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT student_id, first_name, last_name FROM students")
@@ -267,6 +362,7 @@ def delete_student():
         cursor.execute("DELETE FROM health_stats WHERE student_id = :id", {'id': student_id})
         cursor.execute("DELETE FROM address WHERE student_id = :id", {'id': student_id})
         cursor.execute("DELETE FROM students WHERE student_id = :id", {'id': student_id})
+        cursor.execute("DELETE FROM hobbies WHERE student_id = :id", {'id': student_id})
         conn.commit()
     except Exception as e:
         conn.rollback()

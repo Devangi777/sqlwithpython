@@ -4,10 +4,12 @@
     <meta charset="UTF-8">
     <title>Student Selector</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='home.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
 </head>
 <body>
     <div class="container">
         <h1>Select a Student to View Profile</h1>
+
         <form action="/student" method="get">
             <select name="sid" required>
                 <option value="" disabled selected>Select a student</option>
@@ -20,6 +22,11 @@
 
         <a href="/add" class="add-student-btn">Add New Student</a>
         <a href="/delete" class="add-student-btn">Delete Student</a>
+
+        <!-- ✅ Logout button -->
+        <form action="{{ url_for('logout') }}" method="GET" style="margin-top: 20px;">
+            <button type="submit" class="add-student-btn">Logout</button>
+        </form>
     </div>
 </body>
 </html>
