@@ -1,17 +1,36 @@
-from flask import Flask, render_template, request, flash, session
+from flask import Flask, render_template, request, flash, session, redirect, url_for
 from utils import get_db_connection
+from werkzeug.security import generate_password_hash, check_password_hash
 import boto3
 import os
 import json
 from dotenv import load_dotenv
-from flask import redirect, url_for
-from werkzeug.security import generate_password_hash, check_password_hash
+from datetime import timedelta
+from functools import wraps
 
 # Load environment variables from .env
 load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY")
+
+# Secure session settings
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SECURE=True,  # Set to False if not using HTTPS locally
+    SESSION_COOKIE_SAMESITE='Lax',
+    PERMANENT_SESSION_LIFETIME=timedelta(minutes=30)
+)
+
+# Decorator to protect routes
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'username' not in session:
+            flash("Login required.", "warning")
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 @app.route('/', methods=['GET', 'POST'])
 def login():
@@ -26,6 +45,8 @@ def login():
         conn.close()
 
         if result and check_password_hash(result[0], password):
+            session.clear()
+            session.permanent = True
             session['username'] = username
             return redirect(url_for('home'))
         else:
@@ -43,8 +64,6 @@ def signup():
 
         conn = get_db_connection()
         cursor = conn.cursor()
-
-        # Check if username already exists
         cursor.execute("SELECT * FROM users WHERE username = :1", [username])
         if cursor.fetchone():
             flash("Username already exists.")
@@ -52,8 +71,6 @@ def signup():
             return render_template('signup.html')
 
         hashed_pw = generate_password_hash(password)
-
-        # Insert with email
         cursor.execute(
             "INSERT INTO users (username, email, password) VALUES (:1, :2, :3)",
             (username, email, hashed_pw)
@@ -65,7 +82,6 @@ def signup():
         return redirect(url_for('login'))
 
     return render_template('signup.html')
-
 
 @app.route('/forgot-password', methods=['GET', 'POST'])
 def forgot_password():
@@ -95,15 +111,13 @@ def forgot_password():
 
     return render_template('forgot_password.html', message=message, success=success)
 
-
 @app.route('/logout')
 def logout():
-    session.pop('username', None)
+    session.clear()
     flash('Logged out successfully.', 'info')
     return redirect(url_for('login'))
 
-
-# Initialize Amazon Bedrock Runtime client
+# Bedrock client
 bedrock_runtime = boto3.client(
     service_name="bedrock-runtime",
     region_name=os.getenv("AWS_DEFAULT_REGION"),
@@ -112,10 +126,8 @@ bedrock_runtime = boto3.client(
 )
 
 @app.route('/home')
+@login_required
 def home():
-    if 'username' not in session:
-        return redirect(url_for('login'))
-
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT student_id, first_name, last_name FROM students")
@@ -127,6 +139,7 @@ def home():
     return render_template('home.html', students=students)
 
 @app.route('/student')
+@login_required
 def view_student():
     student_id = request.args.get('sid')
     conn = get_db_connection()
@@ -234,10 +247,12 @@ def view_student():
     return render_template("profile.html", student=student, profile_text=student_profile, avatar_data=avatar_data)
 
 @app.route('/add')
+@login_required
 def add_page():
     return render_template('add_student.html')
 
 @app.route('/add_student', methods=['GET', 'POST'])
+@login_required
 def add_student():
     if request.method == 'POST':
         conn = None
@@ -336,6 +351,7 @@ def add_student():
 
 # Delete page
 @app.route('/delete')
+@login_required
 def delete_page():
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -349,6 +365,7 @@ def delete_page():
 
 # Delete handler
 @app.route('/delete_student', methods=['POST'])
+@login_required
 def delete_student():
     student_id = request.form.get('sid')
     if not student_id:
@@ -373,6 +390,7 @@ def delete_student():
     return redirect('/')
 
 @app.route('/update/<int:sid>', methods=['GET', 'POST'])
+@login_required
 def update_student(sid):
     connection = get_db_connection()
     cursor = connection.cursor()
