@@ -1,3 +1,6 @@
 Flask
 python-dotenv
 cx_Oracle
+Flask-JWT-Extended
+Flask-SQLAlchemy
+Werkzeug

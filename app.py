@@ -5,11 +5,136 @@ import os
 import json
 from dotenv import load_dotenv
 from flask import redirect, url_for
+from flask_jwt_extended import(
+    JWTManager, create_access_token, jwt_required,
+    get_jwt_identity
+)
+from werkzeug.security import generate_password_hash, check_password_hash
+from datetime import timedelta
 
 # Load environment variables from .env
 load_dotenv()
-
 app = Flask(__name__)
+
+app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY')
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
+jwt = JWTManager(app)
+
+
+@app.route('/signup', methods=['POST'])
+def signup():
+    data = request.json
+    required_fields = ['username', 'email', 'password']
+    if not all(field in data for field in required_fields):
+        return jsonify({'error': 'Missing fields'}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM users WHERE username = :username", {'username': data['username']})
+        if cursor.fetchone():
+            return jsonify({'error': 'Username already exists'}), 409
+
+        hashed_pw = generate_password_hash(data['password'])
+
+        cursor.execute("""
+            INSERT INTO users (username, email, password)
+            VALUES (:username, :email, :password)
+        """, {
+            'username': data['username'],
+            'email': data['email'],
+            'password': hashed_pw
+        })
+        conn.commit()
+        return jsonify({'message': 'User registered successfully'}), 201
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.json
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("SELECT username, password FROM users WHERE username = :username", {
+            'username': data['username']
+        })
+        user = cursor.fetchone()
+
+        if not user or not check_password_hash(user[1], data['password']):
+            return jsonify({'error': 'Invalid username or password'}), 401
+        print(type(user[0]))
+        user = user[0]
+        access_token = create_access_token(identity={'username':user})
+        return jsonify({'access_token': access_token}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route('/forgot-password', methods=['POST'])
+def forgot_password():
+    data = request.json
+    email = data.get('email')
+
+    if not email:
+        return jsonify({'error': 'Email is required'}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("SELECT username FROM users WHERE email = :email", {'email': email})
+        user = cursor.fetchone()
+
+        if not user:
+            return jsonify({'error': 'Email not found'}), 404
+
+        return jsonify({'message': 'Password reset instructions sent (mock).'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route('/reset-password', methods=['PUT'])
+def reset_password():
+    data = request.json
+    username = data.get('username')
+    new_password = data.get('new_password')
+
+    if not username or not new_password:
+        return jsonify({'error': 'Username and new password are required'}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        hashed_pw = generate_password_hash(new_password)
+        cursor.execute("""
+            UPDATE users SET password = :pw WHERE username = :username
+        """, {'pw': hashed_pw, 'username': username})
+        conn.commit()
+        return jsonify({'message': 'Password reset successful'}), 200
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+@app.route('/secure-data',  methods=['GET'])
+@jwt_required()
+def secure_data():
+    user = get_jwt_identity()  # {'user_id': ..., 'username': ...}
+    #print(user['username'])
+    return jsonify({"message": f"Welcome {'username'}!"})
+
 
 # Initialize Amazon Bedrock Runtime client
 bedrock_runtime = boto3.client(
@@ -20,6 +145,7 @@ bedrock_runtime = boto3.client(
 )
 
 @app.route('/')
+@jwt_required()
 def home():
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -33,6 +159,7 @@ def home():
     return render_template('home.html', students=students)
 
 @app.route('/student', methods=['GET'])
+@jwt_required()
 def view_student():
     student_id = request.args.get('sid')
     conn = get_db_connection()
@@ -98,7 +225,6 @@ def view_student():
     except Exception as e:
         student_profile = f"Error generating AI profile: {e}"
 
-    # -------- Generate image/avatar --------
     try:
         img_prompt = (
             f"A portrait avatar of a {student['gender'].lower()} student, "
@@ -146,10 +272,12 @@ def view_student():
 
 
 @app.route('/add')
+@jwt_required()
 def add_page():
     return render_template('add_student.html')
 
 @app.route('/add_student', methods=['POST'])
+@jwt_required()
 def add_student():
     if request.method == 'POST':
         conn = None
@@ -263,6 +391,7 @@ def add_student():
 
 # Delete page
 @app.route('/delete')
+@jwt_required()
 def delete_page():
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -275,6 +404,7 @@ def delete_page():
     return render_template('delete.html', students=students)
 
 @app.route('/delete_student', methods=['DELETE'])
+@jwt_required()
 def delete_student():
     student_id = request.args.get('sid')  # From query string
 
@@ -304,6 +434,7 @@ def delete_student():
     return jsonify({"message": f"Student {student_id} deleted successfully."}), 200
 
 @app.route('/update/<int:sid>', methods=['PUT'])
+@jwt_required()
 def update_student(sid):
     connection = get_db_connection()
     cursor = connection.cursor()
